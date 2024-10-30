@@ -1,0 +1,556 @@
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta
+            name="viewport"
+            content="initial-scale=1.0, user-scalable=no, width=device-width"
+    />
+    <link
+            rel="stylesheet"
+            href="https://a.amap.com/jsapi_demos/static/demo-center/css/demo-center.css"
+    />
+    <script src="https://a.amap.com/jsapi_demos/static/demo-center/js/demoutils.js"></script>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: "你的高德token",
+        };
+    </script>
+    <script
+            type="text/javascript"
+            src="https://webapi.amap.com/maps?v=2.0&key=你的高德key"
+    ></script>
+
+    <script type="text/javascript" src="https://cache.amap.com/lbs/static/addToolbar.js"></script>
+    <script src="./js/vue.js"></script>
+    <!-- 引入样式 -->
+    <link rel="stylesheet" href="./css/ele.css"/>
+    <!-- 引入组件库 -->
+    <script src="./js/ele.js"></script>
+    <script src="./js/xlsx.full.min.js"></script>
+    <script src="./js/echarts.min.js"></script>
+
+</head>
+<body>
+<div id="container" style="display: none"></div>
+<div id="panel" style="display: none"></div>
+<div id="vueContainer" style="padding: 16px">
+    <table id="myTable" style="display: none">
+        <thead>
+        <tr>
+            <th>小区名称</th>
+            <th>{{formData.target1}}最短距离</th>
+            <th>{{formData.target1}}最快用时</th>
+            <template v-if="formData.target2">
+                <th>{{formData.target2}}最短距离</th>
+                <th>{{formData.target2}}最快用时</th>
+            </template>
+        </tr>
+        </thead>
+        <tbody>
+        <tr v-for="item in excelData">
+            <td>{{item.name}}</td>
+            <td>{{item.distance1}}</td>
+            <td>{{item.time1}}</td>
+            <template v-if="formData.target2">
+                <td>{{item.distance2}}</td>
+                <td>{{item.time2}}</td>
+            </template>
+        </tr>
+        </tbody>
+    </table>
+    <el-form :model="formData">
+        <el-form-item label="所在城市">
+            <el-input v-model="formData.city"/>
+        </el-form-item>
+        <el-form-item label="起点,多个，换行隔开">
+            <el-input type="textarea" :rows="5" v-model="formData.areas"/>
+        </el-form-item>
+        <el-form-item label="终点1">
+            <el-input v-model="formData.target1"/>
+        </el-form-item>
+        <el-form-item label="终点2">
+            <el-input v-model="formData.target2"/>
+        </el-form-item>
+        <el-form-item label="出行方式">
+            <el-select v-model="formData.type">
+                <el-option value="Transfer" label="公交地铁"></el-option>
+                <el-option value="Driving" label="驾车"></el-option>
+                <el-option value="Riding" label="骑行"></el-option>
+            </el-select>
+        </el-form-item>
+    </el-form>
+    <el-button type="primary" @click="search">
+        查询
+    </el-button>
+    <el-button @click="exportToExcel">生成Excel</el-button>
+    <el-table border :data="dataList">
+        <el-table-column prop="from" label="小区名称"></el-table-column>
+        <el-table-column :label="formData.target1 || '-'">
+            <el-table-column prop="minDistance1" label="最短距离">
+                <template #default="{row}">
+                    {{row[formData.target1].minDistance}}
+                </template>
+            </el-table-column>
+            <el-table-column prop="minTime1" label="最短时间">
+                <template #default="{row}">
+                    {{row[formData.target1].minTime}}
+                </template>
+            </el-table-column>
+            <el-table-column prop="name" label="具体路径">
+                <template #default="{row}">
+                    <div
+                            v-for="(plan,pIndex) in row[formData.target1].plans"
+                            :key="pIndex"
+                    >
+                        方案{{pIndex +1}}: {{plan.instructions?.join(',')}}
+                        <b style="color: burlywood">
+                            总用时: {{plan.timeTotal || plan.time || 0}}
+                            总距离：{{plan.distanceTotal || plan.distance || 0}}
+                        </b>
+                        <el-tag type="primary" v-if="plan.shortest"> 最短距离</el-tag>
+                        <el-tag type="danger" v-if="plan.fastest">最快用时</el-tag>
+                    </div>
+                </template>
+            </el-table-column>
+        </el-table-column>
+        <el-table-column :label="formData.target2 || '-'">
+            <el-table-column prop="minDistance2" label="最短距离">
+                <template #default="{row}">
+                    {{row[formData.target2].minDistance}}
+                </template>
+            </el-table-column>
+            <el-table-column prop="minTime2" label="最短时间">
+                <template #default="{row}">
+                    {{row[formData.target2].minTime}}
+                </template>
+            </el-table-column>
+            <el-table-column prop="name" label="具体路径">
+                <template #default="{row}">
+                    <div
+                            v-for="(plan,pIndex) in row[formData.target2].plans"
+                            :key="pIndex"
+                    >
+                        方案{{pIndex +1}}: {{plan.instructions?.join(',')}}
+                        <b style="color: burlywood">
+                            总用时: {{plan.timeTotal || plan.time || 0}}
+                            总距离：{{plan.distanceTotal || plan.distance || 0}}
+                        </b>
+                        <el-tag type="primary" v-if="plan.shortest"> 最短距离</el-tag>
+                        <el-tag type="danger" v-if="plan.fastest">最快用时</el-tag>
+                    </div>
+                </template>
+            </el-table-column>
+        </el-table-column>
+    </el-table>
+    <div
+            id="chart-container"
+            style="margin-top: 32px; height: 500px; overflow: hidden"
+    ></div>
+</div>
+<script type="text/javascript">
+    map = new AMap.Map("container", {
+        resizeEnable: true,
+        zoom: 13,
+    });
+</script>
+<script
+        type="text/javascript"
+        src="https://webapi.amap.com/maps?v=2.0&key=你的高德key&plugin=AMap.Transfer"
+></script>
+<script type="text/javascript">
+    TransferAMap = AMap;
+</script>
+<script
+        type="text/javascript"
+        src="https://webapi.amap.com/maps?v=2.0&key=你的高德key&plugin=AMap.Driving"
+></script>
+<script type="text/javascript">
+    DrivingAMap = AMap;
+</script>
+<script
+        type="text/javascript"
+        src="https://webapi.amap.com/maps?v=2.0&key=你的高德key&plugin=AMap.Riding "
+></script>
+<script type="text/javascript">
+    RidingAMap = AMap;
+</script>
+<script type="text/javascript">
+    const vm = new Vue({
+        el: "#vueContainer",
+        data() {
+            return {
+                myChart: null,
+                loading: false,
+                dataList: [],
+                formData: {
+                    city: "",
+                    type: "Transfer",
+                    areas: "",
+                    target1: "",
+                    target2: "",
+                },
+            };
+        },
+        computed: {
+            usefulAreas() {
+                let area = this.formData.areas.split("\n").filter((item) => {
+                    console.log(`item=${item}  !!item=${!!item}`);
+                    return !!item;
+                });
+                console.log(area);
+                return area;
+            },
+            excelData() {
+                return;
+            },
+        },
+        created() {
+            let formData = JSON.parse(localStorage.getItem('formData'));
+            if (formData != null) {
+                this.formData = formData;
+            }
+        },
+        mounted() {
+            const dom = document.getElementById("chart-container");
+            this.myChart = echarts.init(dom, null, {
+                renderer: "canvas",
+                useDirtyRect: false,
+            });
+            window.addEventListener("resize", this.myChart.resize);
+        },
+        methods: {
+            formatDistance(distance) {
+                return (distance / 1000).toFixed(2) + "公里";
+            },
+            formatTime(time) {
+                return Math.ceil(time / 60) + "分钟";
+            },
+            searchFn(source, from) {
+                return new Promise((resolve, reject) => {
+                    switch (this.formData.type) {
+                        case "Transfer":
+                            //构造公交换乘类
+                            const transfer = new TransferAMap.Transfer({
+                                map,
+                                city: this.formData.city,
+                                panel: "panel",
+                                policy: TransferAMap.TransferPolicy.LEAST_TIME, //乘车策略
+                            });
+                            transfer.search(source, (status, result) => {
+                                console.log(result);
+                                // result即是对应的公交路线数据信息，相关数据结构文档请参考  https://lbs.amap.com/api/javascript-api/reference/route-search#m_TransferResult
+                                if (status === "complete") {
+                                    const plans = result.plans.map((plan) => {
+                                        let distanceTotal = 0;
+                                        let timeTotal = 0;
+                                        const instructions = plan.segments.map(
+                                            ({distance, time, instruction}) => {
+                                                distanceTotal += distance;
+                                                timeTotal += time;
+                                                return instruction;
+                                            }
+                                        );
+                                        return {
+                                            distanceTotal,
+                                            timeTotal,
+                                            instructions,
+                                        };
+                                    });
+                                    plans.forEach((plan, index) => {
+                                        const others = plans.filter((plan, i) => index !== i);
+                                        plan.fastest = others.every(
+                                            (other) => other.timeTotal > plan.timeTotal
+                                        );
+                                        plan.shortest = others.every(
+                                            (other) => other.distanceTotal > plan.distanceTotal
+                                        );
+                                    });
+                                    const minDistance = plans.reduce((a, b) =>
+                                        a.distanceTotal < b.distanceTotal ? a : b
+                                    ).distanceTotal;
+                                    const minTime = plans.reduce((a, b) =>
+                                        a.timeTotal < b.timeTotal ? a : b
+                                    ).timeTotal;
+                                    resolve({
+                                        from,
+                                        minDistance: this.formatDistance(minDistance),
+                                        minTime: this.formatTime(minTime),
+                                        plans: plans.map((plan) => ({
+                                            ...plan,
+                                            timeTotal: this.formatTime(plan.timeTotal),
+                                            distanceTotal: this.formatDistance(
+                                                plan.distanceTotal
+                                            ),
+                                        })),
+                                    });
+                                } else {
+                                    log.error("公交路线数据查询失败" + result);
+                                    reject();
+                                }
+                            });
+                            break;
+                        case "Driving":
+                            const driving = new DrivingAMap.Driving({
+                                map: map,
+                                city: this.formData.city,
+                                panel: "panel",
+                            });
+                            driving.search(source, (status, result) => {
+                                console.log(result);
+                                if (status === "complete") {
+                                    const minDistance = result.routes.reduce((a, b) =>
+                                        a.distance < b.distance ? a : b
+                                    ).distance;
+                                    const minTime = result.routes.reduce((a, b) =>
+                                        a.time < b.time ? a : b
+                                    ).time;
+                                    resolve({
+                                        from,
+                                        minDistance: this.formatDistance(minDistance),
+                                        minTime: this.formatTime(minTime),
+                                        plans: result.routes.map((item) => {
+                                            return {
+                                                distance: this.formatDistance(item.distance),
+                                                time: this.formatTime(item.time),
+                                            };
+                                        }),
+                                    });
+                                } else {
+                                    log.error("公交路线数据查询失败" + result);
+                                    reject();
+                                }
+                            });
+                            break;
+                        case "Riding":
+                            const riding = new RidingAMap.Riding({
+                                map: map,
+                                city: this.formData.city,
+                                panel: "panel",
+                            });
+                            riding.search(source, (status, result) => {
+                                if (status === "complete") {
+                                    const minDistance = result.routes.reduce((a, b) =>
+                                        a.distance < b.distance ? a : b
+                                    ).distance;
+                                    const minTime = result.routes.reduce((a, b) =>
+                                        a.time < b.time ? a : b
+                                    ).time;
+                                    resolve({
+                                        from,
+                                        minDistance: this.formatDistance(minDistance),
+                                        minTime: this.formatTime(minTime),
+                                        plans: result.routes.map((item) => {
+                                            return {
+                                                distance: this.formatDistance(item.distance),
+                                                time: this.formatTime(item.time),
+                                            };
+                                        }),
+                                    });
+                                } else {
+                                    log.error("骑行路线数据查询失败" + result);
+                                    reject();
+                                }
+                            });
+                            break;
+                    }
+                });
+            },
+
+            async search() {
+                localStorage.setItem('formData', JSON.stringify(this.formData));
+                this.loading = true;
+                this.dataList = [];
+                const requests = this.usefulAreas;
+                for (let from of requests) {
+
+
+                    // 使用await关键字等待Generator函数生成的请求完成
+                    let result1 = await this.searchFn(
+                        [
+                            {keyword: from, city: this.formData.city},
+                            {
+                                keyword: this.formData.target1,
+                                city: this.formData.city,
+                            },
+                        ],
+                        from
+                    );
+                    await this.delay(1);
+                    let result2 = await this.searchFn(
+                        [
+                            {keyword: from, city: this.formData.city},
+                            {
+                                keyword: this.formData.target2,
+                                city: this.formData.city,
+                            },
+                        ],
+                        from
+                    );
+
+                    this.dataList.push({
+                        from,
+                        [this.formData.target1]: result1,
+                         [this.formData.target2]: result2,
+                    });
+                    console.log(`dataList=${ this.dataList}`)
+                    await this.delay(1);
+                }
+                this.loading = false;
+                this.draw();
+            },
+            delay(n) {
+                return new Promise(function(resolve) {
+                    setTimeout(resolve, n * 1000);
+                });
+            },
+            exportToExcel() {
+                var table = document.getElementById("myTable");
+                var wb = XLSX.utils.table_to_book(table, {sheet: "Sheet JS"});
+                /*生成Excel文件*/
+                XLSX.writeFile(wb, "租房.xlsx");
+            },
+            draw() {
+                const colors = ["#5470C6", "#91CC75", "#EE6666", "#F9764F"];
+                const option = {
+                    color: colors,
+                    tooltip: {
+                        trigger: "axis",
+                        axisPointer: {
+                            type: "cross",
+                        },
+                    },
+                    grid: {
+                        right: "20%",
+                    },
+                    toolbox: {
+                        feature: {
+                            dataView: {show: true, readOnly: false},
+                            restore: {show: true},
+                            saveAsImage: {show: true},
+                        },
+                    },
+                    legend: {
+                        data: [this.formData.target1, this.formData.target2],
+                    },
+                    xAxis: [
+                        {
+                            type: "category",
+                            axisTick: {
+                                alignWithLabel: true,
+                            },
+                            // prettier-ignore
+                            data: this.usefulAreas,
+                        },
+                    ],
+                    yAxis: [
+                        {
+                            type: "value",
+                            name: this.formData.target1 + "(距离)",
+                            position: "left",
+                            alignTicks: true,
+                            axisLine: {
+                                show: true,
+                                lineStyle: {
+                                    color: colors[0],
+                                },
+                            },
+                            axisLabel: {
+                                formatter: (value) => `${value / 1000}公里`,
+                            },
+                        },
+                        {
+                            type: "value",
+                            name: this.formData.target2 + "(距离)",
+                            position: "left",
+                            alignTicks: true,
+                            offset: 80,
+                            axisLine: {
+                                show: true,
+                                lineStyle: {
+                                    color: colors[1],
+                                },
+                            },
+                            axisLabel: {
+                                formatter: (value) => `${value / 1000}公里`,
+                            },
+                        },
+                        {
+                            type: "value",
+                            name: this.formData.target1 + "(时间)",
+                            position: "right",
+                            alignTicks: true,
+                            axisLine: {
+                                show: true,
+                                lineStyle: {
+                                    color: colors[2],
+                                },
+                            },
+                            axisLabel: {
+                                formatter: (value) => `${value / 60}分钟`,
+                            },
+                        },
+                        {
+                            type: "value",
+                            name: this.formData.target2 + "(时间)",
+                            position: "right",
+                            alignTicks: true,
+                            axisLine: {
+                                show: true,
+                                lineStyle: {
+                                    color: colors[3],
+                                },
+                            },
+                            axisLabel: {
+                                formatter: (value) => `${value / 60}分钟`,
+                            },
+                        },
+                    ],
+                    series: [
+                        {
+                            name: this.formData.target1 + "(距离)",
+                            type: "bar",
+                            data: this.dataList.map((item) => {
+                                return (
+                                    parseFloat(item[this.formData.target1].minDistance) * 1000
+                                );
+                            }),
+                        },
+                        {
+                            name: this.formData.target2 + "(距离)",
+                            type: "bar",
+                            yAxisIndex: 1,
+                            data: this.dataList.map((item) => {
+                                return (
+                                    parseFloat(item[this.formData.target2].minDistance) * 1000
+                                );
+                            }),
+                        },
+                        {
+                            name: this.formData.target1 + "(时间)",
+                            type: "line",
+                            yAxisIndex: 2,
+                            data: this.dataList.map((item) => {
+                                return parseFloat(item[this.formData.target1].minTime) * 60;
+                            }),
+                        },
+                        {
+                            name: this.formData.target2 + "(时间)",
+                            type: "line",
+                            yAxisIndex: 2,
+                            data: this.dataList.map((item) => {
+                                return parseFloat(item[this.formData.target2].minTime) * 60;
+                            }),
+                        },
+                    ],
+                };
+
+                if (option && typeof option === "object") {
+                    this.myChart.setOption(option);
+                }
+            },
+        },
+    });
+</script>
+</body>
+</html>
